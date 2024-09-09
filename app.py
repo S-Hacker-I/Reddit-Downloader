@@ -36,11 +36,12 @@ def download():
         with lock:
             try:
                 download_video(video_url, output_file)
+                return send_file(output_file, as_attachment=True)
             except Exception as e:
-                os.remove(output_file)
+                if os.path.exists(output_file):
+                    os.remove(output_file)
                 return jsonify({'error': str(e)}), 500
-        return send_file(output_file, as_attachment=True)
-    
+
     # Start a new thread for the download task
     download_thread = threading.Thread(target=handle_download)
     download_thread.start()
