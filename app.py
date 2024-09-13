@@ -1,5 +1,4 @@
 from flask import Flask, request, jsonify, send_from_directory, send_file, abort
-from flask_cors import CORS  # Import CORS
 import yt_dlp
 import os
 import logging
@@ -11,22 +10,19 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app)
 
-# Enable CORS for all routes
-CORS(app)  # Allow all origins
-
-# Alternatively, you can specify allowed origins like this:
-# CORS(app, origins=["http://127.0.0.1:5500", "https://your-frontend-domain.com"])
-
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
 
+# Directory to store downloaded files
 DOWNLOAD_FOLDER = 'downloads'
 if not os.path.exists(DOWNLOAD_FOLDER):
     os.makedirs(DOWNLOAD_FOLDER)
 
+# Dictionary to store mapping of tokens to filenames
 downloads = {}
 
 def schedule_file_deletion(filepath, delay=900):
+    """Schedule file deletion after a delay (default 15 minutes)."""
     def delete_file():
         time.sleep(delay)
         if os.path.exists(filepath):
@@ -45,6 +41,52 @@ def schedule_file_deletion(filepath, delay=900):
 def index():
     return send_from_directory('static', 'index.html')
 
+def download_video(url, download_folder):
+    """Download and process the video."""
+    ydl_opts = {
+        'format': 'bestvideo+bestaudio/best',
+        'outtmpl': os.path.join(download_folder, '%(title)s.%(ext)s'),
+        'postprocessors': [{
+            'key': 'FFmpegVideoConvertor',
+            'preferedformat': 'mp4',
+        }],
+        'noplaylist': True,
+        'quiet': True,
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        try:
+            logging.debug(f"Starting download for URL: {url}")
+            info_dict = ydl.extract_info(url, download=True)
+            filename = ydl.prepare_filename(info_dict)
+            base, ext = os.path.splitext(filename)
+            if ext != '.mp4':
+                mp4_filename = base + '.mp4'
+                mp4_filepath = os.path.join(download_folder, mp4_filename)
+                if os.path.exists(filename):
+                    os.rename(filename, mp4_filepath)
+                    filename = mp4_filename
+                else:
+                    logging.error(f'File {filename} not found for renaming')
+                    return None
+            else:
+                filename = os.path.basename(filename)
+            
+            logging.info(f"Download completed for: {filename}")
+            return filename
+        except yt_dlp.utils.DownloadError as e:
+            logging.error(f"Download error: {e}")
+            return None
+        except yt_dlp.utils.ExtractorError as e:
+            logging.error(f"Extractor error: {e}")
+            return None
+        except yt_dlp.utils.PostProcessingError as e:
+            logging.error(f"Post-processing error: {e}")
+            return None
+        except Exception as e:
+            logging.error(f"General error: {e}")
+            return None
+
 @app.route('/download', methods=['POST'])
 def download():
     data = request.json
@@ -53,49 +95,14 @@ def download():
     if not url:
         return jsonify({'error': 'URL is required'}), 400
 
-    def download_video(url, download_folder):
-        ydl_opts = {
-            'format': 'bestvideo+bestaudio/best',
-            'outtmpl': os.path.join(download_folder, '%(title)s.%(ext)s'),
-            'postprocessors': [{
-                'key': 'FFmpegVideoConvertor',
-                'preferedformat': 'mp4',
-            }],
-            'noplaylist': True,
-            'quiet': True,
-        }
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            try:
-                info_dict = ydl.extract_info(url, download=True)
-                filename = ydl.prepare_filename(info_dict)
-                base, ext = os.path.splitext(filename)
-                if ext != '.mp4':
-                    mp4_filename = base + '.mp4'
-                    mp4_filepath = os.path.join(download_folder, mp4_filename)
-                    if os.path.exists(filename):
-                        os.rename(filename, mp4_filepath)
-                        filename = mp4_filename
-                    else:
-                        logging.error(f'File {filename} not found for renaming')
-                        return None
-                else:
-                    filename = os.path.basename(filename)
-                
-                return filename
-            except yt_dlp.utils.ExtractorError as e:
-                logging.error('Extractor error: %s', e)
-                return None
-            except Exception as e:
-                logging.error('Error: %s', e)
-                return None
-
     def task():
         filename = download_video(url, DOWNLOAD_FOLDER)
         return filename
 
+    # Generate a unique token for this download request
     token = str(uuid.uuid4())
-
+    
+    # Run the download in a separate thread
     thread = threading.Thread(target=lambda: downloads.update({token: task()}))
     thread.start()
     thread.join()
@@ -104,12 +111,13 @@ def download():
     if filename:
         file_path = os.path.join(DOWNLOAD_FOLDER, filename)
         if os.path.exists(file_path):
+            # Schedule the file deletion after 15 minutes
             schedule_file_deletion(file_path)
             return jsonify({'token': token, 'download_link': f'/downloads/{token}'})
         else:
             return jsonify({'error': 'Failed to locate the downloaded file'}), 500
     else:
-        return jsonify({'error': 'Failed to download video'}), 500
+        return jsonify({'error': 'Failed to download video. Ensure the URL is valid or try again later.'}), 500
 
 @app.route('/downloads/<token>', methods=['GET'])
 def download_file(token):
