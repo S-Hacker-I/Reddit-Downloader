@@ -1,11 +1,12 @@
-from flask import Flask, request, jsonify, send_from_directory, Response
+from flask import Flask, request, jsonify, send_file, send_from_directory, Response
+from flask_cors import CORS
 import yt_dlp
 import os
 from threading import Thread, Timer
 import datetime
-from werkzeug.utils import safe_join, secure_filename
 
 app = Flask(__name__)
+CORS(app)  # Enable CORS for all routes
 
 # Global variables to track points and downloads
 global_points = 10000  # Example starting points
@@ -66,19 +67,10 @@ def generate_file_stream(file_path):
             yield chunk
             chunk = file.read(4096)
 
-# Serve static files from any directory
-@app.route('/<path:filename>')
-def serve_file(filename):
-    try:
-        # Safely join the path to avoid directory traversal
-        safe_path = safe_join(DOWNLOAD_FOLDER, filename)
-        # Ensure the file exists
-        if os.path.isfile(safe_path):
-            return send_from_directory(DOWNLOAD_FOLDER, filename)
-        else:
-            return jsonify({'error': 'File not found'}), 404
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+# Serve the main HTML page
+@app.route('/')
+def index():
+    return send_from_directory('.', 'index.html')
 
 @app.route('/download', methods=['POST'])
 def download():
@@ -141,4 +133,4 @@ if __name__ == '__main__':
     # Start the balance reset scheduler
     Timer(0, reset_balance).start()  # Start immediately
     # Set custom port and enable threading
-    app.run(debug=True, host='0.0.0.0', port=5000, threaded=True)
+    app.run(debug=True, host='0.0.0.0', port=10000, threaded=True)
