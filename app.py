@@ -1,9 +1,10 @@
-from flask import Flask, request, jsonify, send_file, abort
+from flask import Flask, request, jsonify, send_from_directory, send_file, abort
 import yt_dlp
 import os
 import logging
 import threading
 import uuid
+import time
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
@@ -38,7 +39,7 @@ def schedule_file_deletion(filepath, delay=900):
 
 @app.route('/')
 def index():
-    return send_file('index.html')
+    return send_from_directory('static', 'index.html')
 
 @app.route('/download', methods=['POST'])
 def download():
