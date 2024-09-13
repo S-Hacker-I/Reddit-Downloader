@@ -46,18 +46,25 @@ def download_media(url, format_type):
             'outtmpl': f'{DOWNLOAD_FOLDER}/%(title)s.%(ext)s',
         }
     
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-        file_name = ydl.prepare_filename(info)
-        
-        # Download and process the file (conversion if needed)
-        ydl.download([url])
-        
-        # Ensure the correct extension for MP3
-        if format_type == "mp3":
-            file_name = file_name.rsplit('.', 1)[0] + '.mp3'
-        
-        return file_name
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            file_name = ydl.prepare_filename(info)
+            
+            # Download and process the file (conversion if needed)
+            ydl.download([url])
+            
+            # Ensure the correct extension for MP3
+            if format_type == "mp3":
+                file_name = file_name.rsplit('.', 1)[0] + '.mp3'
+            
+            return file_name
+    except yt_dlp.utils.DownloadError as e:
+        print(f"DownloadError: {e}")
+        raise
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        raise
 
 # Function to stream files in chunks
 def generate_file_stream(file_path):
