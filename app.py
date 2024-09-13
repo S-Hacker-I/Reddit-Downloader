@@ -1,47 +1,47 @@
-from flask import Flask, request, jsonify, send_file, make_response
-import yt_dlp
 import os
+from flask import Flask, request, jsonify, send_file
+import yt_dlp
 
 app = Flask(__name__)
 
-# Ensure the downloads directory exists
+# Ensure the downloads folder exists
 if not os.path.exists('downloads'):
     os.makedirs('downloads')
-
-@app.after_request
-def add_cors_headers(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
-    return response
 
 @app.route('/download', methods=['POST', 'OPTIONS'])
 def download_video():
     if request.method == 'OPTIONS':
         return '', 200
 
-    url = request.json.get('url')
+    data = request.get_json()
+    url = data.get('url')
+    
     if not url:
         return jsonify({'error': 'No URL provided'}), 400
 
+    # Replace 'www.reddit.com' with 'old.reddit.com' for better compatibility
+    if 'reddit.com' in url:
+        url = url.replace('www.reddit.com', 'old.reddit.com')
+
     try:
-        # Define download options
+        # yt-dlp options for downloading best video+audio
         ydl_opts = {
             'format': 'bestvideo+bestaudio/best',
-            'outtmpl': 'downloads/video.%(ext)s',
+            'outtmpl': 'downloads/%(title)s.%(ext)s',
             'noplaylist': True,
         }
 
-        # Download video
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info_dict = ydl.extract_info(url, download=True)
-            file_path = 'downloads/video.' + info_dict['ext']
+            info = ydl.extract_info(url, download=True)
+            file_name = f"downloads/{info['title']}.{info['ext']}"
 
-        # Return the downloaded file
-        return send_file(file_path, as_attachment=True, attachment_filename='video.' + info_dict['ext'])
+        # Send the downloaded file to the user
+        return send_file(file_name, as_attachment=True)
 
+    except yt_dlp.utils.DownloadError as e:
+        return jsonify({'error': 'Failed to download video: ' + str(e)}), 500
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'An unexpected error occurred: ' + str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000)
