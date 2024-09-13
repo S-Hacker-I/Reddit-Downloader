@@ -1,59 +1,47 @@
-from flask import Flask, request, Response, jsonify
+from flask import Flask, request, jsonify, send_file, make_response
 import yt_dlp
 import os
 
 app = Flask(__name__)
 
-DOWNLOAD_FOLDER = 'downloads'
-if not os.path.exists(DOWNLOAD_FOLDER):
-    os.makedirs(DOWNLOAD_FOLDER)
+# Ensure the downloads directory exists
+if not os.path.exists('downloads'):
+    os.makedirs('downloads')
 
-def download_media(url, format_type):
-    ydl_opts = {}
-    if format_type == "mp4":
-        ydl_opts = {
-            'format': 'bestvideo+bestaudio',
-            'outtmpl': f'{DOWNLOAD_FOLDER}/%(title)s.%(ext)s',
-        }
-    elif format_type == "mp3":
-        ydl_opts = {
-            'format': 'bestaudio',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-            'outtmpl': f'{DOWNLOAD_FOLDER}/%(title)s.%(ext)s',
-        }
+@app.after_request
+def add_cors_headers(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+    return response
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-        file_name = ydl.prepare_filename(info)
-        ydl.download([url])
-        return file_name
+@app.route('/download', methods=['POST', 'OPTIONS'])
+def download_video():
+    if request.method == 'OPTIONS':
+        return '', 200
 
-# Stream the file as it is being downloaded
-def stream_file(file_path):
-    def generate():
-        with open(file_path, "rb") as f:
-            while chunk := f.read(8192):
-                yield chunk
-    return Response(generate(), headers={
-        'Content-Disposition': f'attachment; filename="{os.path.basename(file_path)}"',
-        'Content-Type': 'application/octet-stream',
-    })
-
-@app.route('/download', methods=['POST'])
-def download():
-    data = request.json
-    url = data.get('url')
-    format_type = data.get('format', 'mp4')
+    url = request.json.get('url')
+    if not url:
+        return jsonify({'error': 'No URL provided'}), 400
 
     try:
-        file_path = download_media(url, format_type)
-        return stream_file(file_path)
+        # Define download options
+        ydl_opts = {
+            'format': 'bestvideo+bestaudio/best',
+            'outtmpl': 'downloads/video.%(ext)s',
+            'noplaylist': True,
+        }
+
+        # Download video
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info_dict = ydl.extract_info(url, download=True)
+            file_path = 'downloads/video.' + info_dict['ext']
+
+        # Return the downloaded file
+        return send_file(file_path, as_attachment=True, attachment_filename='video.' + info_dict['ext'])
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True)
