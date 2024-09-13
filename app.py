@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify, send_from_directory, send_file, abort
+from flask_cors import CORS  # Import CORS
 import yt_dlp
 import os
 import logging
@@ -10,19 +11,22 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app)
 
+# Enable CORS for all routes
+CORS(app)  # Allow all origins
+
+# Alternatively, you can specify allowed origins like this:
+# CORS(app, origins=["http://127.0.0.1:5500", "https://your-frontend-domain.com"])
+
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
 
-# Directory to store downloaded files
 DOWNLOAD_FOLDER = 'downloads'
 if not os.path.exists(DOWNLOAD_FOLDER):
     os.makedirs(DOWNLOAD_FOLDER)
 
-# Dictionary to store mapping of tokens to filenames
 downloads = {}
 
 def schedule_file_deletion(filepath, delay=900):
-    """Schedule file deletion after a delay (default 15 minutes)."""
     def delete_file():
         time.sleep(delay)
         if os.path.exists(filepath):
@@ -50,7 +54,6 @@ def download():
         return jsonify({'error': 'URL is required'}), 400
 
     def download_video(url, download_folder):
-        """Download and process the video."""
         ydl_opts = {
             'format': 'bestvideo+bestaudio/best',
             'outtmpl': os.path.join(download_folder, '%(title)s.%(ext)s'),
@@ -91,10 +94,8 @@ def download():
         filename = download_video(url, DOWNLOAD_FOLDER)
         return filename
 
-    # Generate a unique token for this download request
     token = str(uuid.uuid4())
-    
-    # Run the download in a separate thread
+
     thread = threading.Thread(target=lambda: downloads.update({token: task()}))
     thread.start()
     thread.join()
@@ -103,7 +104,6 @@ def download():
     if filename:
         file_path = os.path.join(DOWNLOAD_FOLDER, filename)
         if os.path.exists(file_path):
-            # Schedule the file deletion after 15 minutes
             schedule_file_deletion(file_path)
             return jsonify({'token': token, 'download_link': f'/downloads/{token}'})
         else:
