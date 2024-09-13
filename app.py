@@ -1,20 +1,19 @@
-from flask import Flask, request, jsonify, send_file, render_template, send_from_directory
+from flask import Flask, request, Response, send_from_directory
 import yt_dlp
 import os
+import logging
 
 app = Flask(__name__)
 
-# Global variables to track points and downloads
-global_points = 10000  # Example starting points
-global_downloads = 0
-lifetime_points_used = 0
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Directory to store downloads temporarily
 DOWNLOAD_FOLDER = 'downloads'
 if not os.path.exists(DOWNLOAD_FOLDER):
     os.makedirs(DOWNLOAD_FOLDER)
 
-# Function to download the video or audio
 def download_media(url, format_type):
     ydl_opts = {}
     if format_type == "mp4":
@@ -39,43 +38,31 @@ def download_media(url, format_type):
         ydl.download([url])
         return file_name
 
-# Serve the main HTML page
 @app.route('/')
 def index():
     return send_from_directory('', 'index.html')
 
 @app.route('/download', methods=['POST'])
 def download():
-    global global_points, global_downloads, lifetime_points_used
-    
     data = request.json
     url = data.get('url')
     format_type = data.get('format', 'mp4')  # Default to mp4 if not provided
 
-    # Ensure user has enough points
-    if global_points < 5:
-        return jsonify({'error': 'Not enough points'}), 403
-
     try:
-        # Download media
         file_path = download_media(url, format_type)
         
-        # Deduct points and update download count
-        global_points -= 5
-        global_downloads += 1
-        lifetime_points_used += 5
+        # Stream the file
+        def generate():
+            with open(file_path, 'rb') as f:
+                while chunk := f.read(8192):
+                    yield chunk
         
-        return send_file(file_path, as_attachment=True)
+        response = Response(generate(), content_type='application/octet-stream')
+        response.headers.set('Content-Disposition', f'attachment; filename={os.path.basename(file_path)}')
+        return response
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/points', methods=['GET'])
-def points():
-    return jsonify({
-        'balance': global_points,
-        'downloads': global_downloads,
-        'lifetime_points_used': lifetime_points_used
-    })
+        logger.error(f"Error: {str(e)}")
+        return jsonify({'error': 'Failed to download'}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
