@@ -1,14 +1,20 @@
 from flask import Flask, request, jsonify, send_file, send_from_directory
 import yt_dlp
 import os
-import threading
+from threading import Thread, Lock
+import logging
 
 app = Flask(__name__)
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Global variables to track points and downloads
 global_points = 10000  # Example starting points
 global_downloads = 0
 lifetime_points_used = 0
+download_lock = Lock()
 
 # Directory to store downloads temporarily
 DOWNLOAD_FOLDER = 'downloads'
@@ -16,13 +22,12 @@ if not os.path.exists(DOWNLOAD_FOLDER):
     os.makedirs(DOWNLOAD_FOLDER)
 
 # Function to download the video or audio
-def download_media(url, format_type):
+def download_media(url, format_type, callback):
     ydl_opts = {}
     if format_type == "mp4":
         ydl_opts = {
             'format': 'bestvideo+bestaudio',
             'outtmpl': f'{DOWNLOAD_FOLDER}/%(title)s.%(ext)s',
-            'noplaylist': True
         }
     elif format_type == "mp3":
         ydl_opts = {
@@ -33,7 +38,6 @@ def download_media(url, format_type):
                 'preferredquality': '192',
             }],
             'outtmpl': f'{DOWNLOAD_FOLDER}/%(title)s.%(ext)s',
-            'noplaylist': True
         }
     
     try:
@@ -41,13 +45,14 @@ def download_media(url, format_type):
             info = ydl.extract_info(url, download=False)
             file_name = ydl.prepare_filename(info)
             ydl.download([url])
-            return file_name
+            # Ensure the correct extension for MP3
+            if format_type == "mp3":
+                file_name = file_name.rsplit('.', 1)[0] + '.mp3'
+            callback(file_name)
     except yt_dlp.utils.DownloadError as e:
-        app.logger.error(f"DownloadError: {e}")
-        raise
+        logger.error(f"DownloadError: {e}")
     except Exception as e:
-        app.logger.error(f"Unexpected error: {e}")
-        raise
+        logger.error(f"Unexpected error: {e}")
 
 # Serve the main HTML page
 @app.route('/')
@@ -57,7 +62,7 @@ def index():
 @app.route('/download', methods=['POST'])
 def download():
     global global_points, global_downloads, lifetime_points_used
-
+    
     data = request.json
     url = data.get('url')
     format_type = data.get('format', 'mp4')  # Default to mp4 if not provided
@@ -66,26 +71,30 @@ def download():
     if global_points < 5:
         return jsonify({'error': 'Not enough points'}), 403
 
-    try:
-        # Handle download in a separate thread
-        def handle_download():
-            nonlocal file_path
-            file_path = download_media(url, format_type)
+    # Using a list to store file_path because nonlocal cannot be used
+    file_path = [None]
+
+    def handle_download(file_name):
+        nonlocal file_path
+        file_path[0] = file_name
         
-        file_path = None
-        download_thread = threading.Thread(target=handle_download)
+        # Deduct points and update download count
+        with download_lock:
+            global_points -= 5
+            global_downloads += 1
+            lifetime_points_used += 5
+
+    try:
+        # Download media in a separate thread to prevent blocking
+        download_thread = Thread(target=download_media, args=(url, format_type, handle_download))
         download_thread.start()
         download_thread.join()  # Wait for the thread to finish
-
-        # Deduct points and update download count
-        global_points -= 5
-        global_downloads += 1
-        lifetime_points_used += 5
-
-        # Return the file as an attachment
-        return send_file(file_path, as_attachment=True)
-    except yt_dlp.utils.DownloadError:
-        return jsonify({'error': 'Failed to download the video. Please check the URL or try again later.'}), 500
+        
+        # Return the file as a response
+        if file_path[0]:
+            return send_file(file_path[0], as_attachment=True)
+        else:
+            return jsonify({'error': 'Failed to download'}), 500
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -98,5 +107,4 @@ def points():
     })
 
 if __name__ == '__main__':
-    # Specify the port and enable threading for concurrent requests
-    app.run(debug=True, host='0.0.0.0', port=5000, threaded=True)
+    app.run(debug=True, threaded=True)
