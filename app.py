@@ -1,10 +1,9 @@
 from flask import Flask, request, jsonify, send_file, send_from_directory
-from flask_cors import CORS
 import yt_dlp
 import os
+import threading
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
 
 # Global variables to track points and downloads
 global_points = 10000  # Example starting points
@@ -23,6 +22,7 @@ def download_media(url, format_type):
         ydl_opts = {
             'format': 'bestvideo+bestaudio',
             'outtmpl': f'{DOWNLOAD_FOLDER}/%(title)s.%(ext)s',
+            'noplaylist': True
         }
     elif format_type == "mp3":
         ydl_opts = {
@@ -33,13 +33,21 @@ def download_media(url, format_type):
                 'preferredquality': '192',
             }],
             'outtmpl': f'{DOWNLOAD_FOLDER}/%(title)s.%(ext)s',
+            'noplaylist': True
         }
     
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-        file_name = ydl.prepare_filename(info)
-        ydl.download([url])
-        return file_name
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            file_name = ydl.prepare_filename(info)
+            ydl.download([url])
+            return file_name
+    except yt_dlp.utils.DownloadError as e:
+        app.logger.error(f"DownloadError: {e}")
+        raise
+    except Exception as e:
+        app.logger.error(f"Unexpected error: {e}")
+        raise
 
 # Serve the main HTML page
 @app.route('/')
@@ -49,7 +57,7 @@ def index():
 @app.route('/download', methods=['POST'])
 def download():
     global global_points, global_downloads, lifetime_points_used
-    
+
     data = request.json
     url = data.get('url')
     format_type = data.get('format', 'mp4')  # Default to mp4 if not provided
@@ -59,15 +67,25 @@ def download():
         return jsonify({'error': 'Not enough points'}), 403
 
     try:
-        # Download media
-        file_path = download_media(url, format_type)
+        # Handle download in a separate thread
+        def handle_download():
+            nonlocal file_path
+            file_path = download_media(url, format_type)
         
+        file_path = None
+        download_thread = threading.Thread(target=handle_download)
+        download_thread.start()
+        download_thread.join()  # Wait for the thread to finish
+
         # Deduct points and update download count
         global_points -= 5
         global_downloads += 1
         lifetime_points_used += 5
-        
+
+        # Return the file as an attachment
         return send_file(file_path, as_attachment=True)
+    except yt_dlp.utils.DownloadError:
+        return jsonify({'error': 'Failed to download the video. Please check the URL or try again later.'}), 500
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -80,4 +98,5 @@ def points():
     })
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Specify the port and enable threading for concurrent requests
+    app.run(debug=True, host='0.0.0.0', port=5000, threaded=True)
