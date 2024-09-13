@@ -1,8 +1,9 @@
-from flask import Flask, request, jsonify, send_file, send_from_directory, Response
+from flask import Flask, request, jsonify, send_from_directory, Response
 import yt_dlp
 import os
 from threading import Thread, Timer
 import datetime
+from werkzeug.utils import safe_join, secure_filename
 
 app = Flask(__name__)
 
@@ -65,10 +66,19 @@ def generate_file_stream(file_path):
             yield chunk
             chunk = file.read(4096)
 
-# Serve the main HTML page
-@app.route('/')
-def index():
-    return send_from_directory('.', 'index.html')
+# Serve static files from any directory
+@app.route('/<path:filename>')
+def serve_file(filename):
+    try:
+        # Safely join the path to avoid directory traversal
+        safe_path = safe_join(DOWNLOAD_FOLDER, filename)
+        # Ensure the file exists
+        if os.path.isfile(safe_path):
+            return send_from_directory(DOWNLOAD_FOLDER, filename)
+        else:
+            return jsonify({'error': 'File not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/download', methods=['POST'])
 def download():
