@@ -1,27 +1,29 @@
-from flask import Flask, request, jsonify, send_file, Response
+from flask import Flask, request, jsonify, send_file, send_from_directory, Response
 import yt_dlp
 import os
-import threading
-from concurrent.futures import ThreadPoolExecutor
+from threading import Thread, Timer
+import datetime
 
 app = Flask(__name__)
 
-# Global variables to track points and downloads, protected by locks
-global_points = 10000  # Starting points
+# Global variables to track points and downloads
+global_points = 10000  # Example starting points
 global_downloads = 0
 lifetime_points_used = 0
 
-# Locks to prevent race conditions
-points_lock = threading.Lock()
-downloads_lock = threading.Lock()
+# Allowed referer domains
+ALLOWED_REFERERS = [
+    'https://trendfydigital.com',
+    'http://127.0.0.1:5500'
+]
 
 # Directory to store downloads temporarily
 DOWNLOAD_FOLDER = 'downloads'
 if not os.path.exists(DOWNLOAD_FOLDER):
     os.makedirs(DOWNLOAD_FOLDER)
 
-# Thread pool for handling concurrent downloads
-executor = ThreadPoolExecutor(max_workers=100)  # Adjust number of workers for high load
+def allowed_referer(referer):
+    return any(referer.startswith(allowed) for allowed in ALLOWED_REFERERS)
 
 # Function to download the video or audio
 def download_media(url, format_type):
@@ -41,18 +43,18 @@ def download_media(url, format_type):
             }],
             'outtmpl': f'{DOWNLOAD_FOLDER}/%(title)s.%(ext)s',
         }
-
+    
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
         file_name = ydl.prepare_filename(info)
-
+        
         # Download and process the file (conversion if needed)
         ydl.download([url])
-
+        
         # Ensure the correct extension for MP3
         if format_type == "mp3":
             file_name = file_name.rsplit('.', 1)[0] + '.mp3'
-
+        
         return file_name
 
 # Function to stream files in chunks
@@ -66,48 +68,49 @@ def generate_file_stream(file_path):
 # Serve the main HTML page
 @app.route('/')
 def index():
-    return send_from_directory('', 'index.html')
+    return send_from_directory('.', 'index.html')
 
-# Handle download requests concurrently
 @app.route('/download', methods=['POST'])
 def download():
     global global_points, global_downloads, lifetime_points_used
+    
+    # Check Referer header
+    referer = request.headers.get('Referer')
+    if referer is None or not allowed_referer(referer):
+        return jsonify({'error': 'Forbidden'}), 403
 
     data = request.json
     url = data.get('url')
     format_type = data.get('format', 'mp4')  # Default to mp4 if not provided
 
     # Ensure user has enough points
-    with points_lock:
-        if global_points < 5:
-            return jsonify({'error': 'Not enough points'}), 403
+    if global_points < 5:
+        return jsonify({'error': 'Not enough points'}), 403
 
     try:
-        # Concurrent task for downloading media
+        # Download media in a separate thread to prevent blocking
         def handle_download():
-            return download_media(url, format_type)
-
-        # Run the download in a separate thread
-        future = executor.submit(handle_download)
-        file_path = future.result()
-
-        # Update points and downloads safely
-        with points_lock:
-            global_points -= 5
-            lifetime_points_used += 5
-
-        with downloads_lock:
-            global_downloads += 1
+            nonlocal file_path
+            file_path = download_media(url, format_type)
+        
+        file_path = None
+        download_thread = Thread(target=handle_download)
+        download_thread.start()
+        download_thread.join()  # Wait for the thread to finish
+        
+        # Deduct points and update download count
+        global_points -= 5
+        global_downloads += 1
+        lifetime_points_used += 5
 
         # Return the file as a stream
-        return Response(generate_file_stream(file_path),
+        return Response(generate_file_stream(file_path), 
                         headers={"Content-Disposition": f"attachment; filename={os.path.basename(file_path)}"},
                         content_type="application/octet-stream")
-
+    
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# Get the points and download stats
 @app.route('/points', methods=['GET'])
 def points():
     return jsonify({
@@ -116,6 +119,16 @@ def points():
         'lifetime_points_used': lifetime_points_used
     })
 
+def reset_balance():
+    global global_points
+    global_points = 10000
+    print(f"Balance reset to {global_points} at {datetime.datetime.now()}")
+    
+    # Schedule the next reset in 24 hours
+    Timer(86400, reset_balance).start()
+
 if __name__ == '__main__':
-    # For production-level concurrent requests, use gunicorn to run the app
+    # Start the balance reset scheduler
+    Timer(0, reset_balance).start()  # Start immediately
+    # Set custom port and enable threading
     app.run(debug=True, host='0.0.0.0', port=5001, threaded=True)
