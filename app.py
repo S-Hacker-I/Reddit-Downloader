@@ -8,11 +8,8 @@ app = Flask(__name__)
 if not os.path.exists('downloads'):
     os.makedirs('downloads')
 
-@app.route('/download', methods=['POST', 'OPTIONS'])
+@app.route('/download', methods=['POST'])
 def download_video():
-    if request.method == 'OPTIONS':
-        return '', 200
-
     data = request.get_json()
     url = data.get('url')
     
