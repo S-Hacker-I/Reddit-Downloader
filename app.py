@@ -1,12 +1,16 @@
-from flask import Flask, request, jsonify, send_file, send_from_directory, Response
-from flask_cors import CORS
+from flask import Flask, request, jsonify, send_from_directory, Response
 import yt_dlp
 import os
 from threading import Thread, Timer
 import datetime
+import logging
+from werkzeug.utils import safe_join, secure_filename
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Global variables to track points and downloads
 global_points = 10000  # Example starting points
@@ -60,10 +64,10 @@ def download_media(url, format_type):
             
             return file_name
     except yt_dlp.utils.DownloadError as e:
-        print(f"DownloadError: {e}")
+        logger.error(f"DownloadError: {e}")
         raise
     except Exception as e:
-        print(f"Unexpected error: {e}")
+        logger.error(f"Unexpected error: {e}")
         raise
 
 # Function to stream files in chunks
@@ -74,10 +78,20 @@ def generate_file_stream(file_path):
             yield chunk
             chunk = file.read(4096)
 
-# Serve the main HTML page
-@app.route('/')
-def index():
-    return send_from_directory('.', 'index.html')
+# Serve static files from any directory
+@app.route('/<path:filename>')
+def serve_file(filename):
+    try:
+        # Safely join the path to avoid directory traversal
+        safe_path = safe_join(DOWNLOAD_FOLDER, filename)
+        # Ensure the file exists
+        if os.path.isfile(safe_path):
+            return send_from_directory(DOWNLOAD_FOLDER, filename)
+        else:
+            return jsonify({'error': 'File not found'}), 404
+    except Exception as e:
+        logger.error(f"Error serving file: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/download', methods=['POST'])
 def download():
@@ -118,6 +132,7 @@ def download():
                         content_type="application/octet-stream")
     
     except Exception as e:
+        logger.error(f"Error in download: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/points', methods=['GET'])
@@ -131,7 +146,7 @@ def points():
 def reset_balance():
     global global_points
     global_points = 10000
-    print(f"Balance reset to {global_points} at {datetime.datetime.now()}")
+    logger.info(f"Balance reset to {global_points} at {datetime.datetime.now()}")
     
     # Schedule the next reset in 24 hours
     Timer(86400, reset_balance).start()
@@ -140,4 +155,4 @@ if __name__ == '__main__':
     # Start the balance reset scheduler
     Timer(0, reset_balance).start()  # Start immediately
     # Set custom port and enable threading
-    app.run(debug=True, host='0.0.0.0', port=10000, threaded=True)
+    app.run(debug=True, host='0.0.0.0', port=5000, threaded=True)
