@@ -32,7 +32,7 @@ def download_video():
 
         # Download the video
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([reddit_url])
+            info_dict = ydl.extract_info(reddit_url, download=True)
 
         # Send the video file for download
         return jsonify({"video_id": video_id}), 200
