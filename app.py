@@ -1,10 +1,13 @@
-from flask import Flask, request, send_file, jsonify
-import yt_dlp
-import subprocess
-import os
-import traceback
+from flask import Flask, request, send_file, jsonify, Response
 
 app = Flask(__name__)
+
+@app.after_request
+def apply_cors(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+    return response
 
 @app.route('/download', methods=['POST'])
 def download_video():
@@ -36,4 +39,4 @@ def download_video():
     return send_file('output_video.mp4', as_attachment=True)
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0')  # Ensure it listens on all IPs for deployment
+    app.run(debug=True, host='0.0.0.0')
