@@ -23,6 +23,7 @@ def download_video():
     try:
         data = request.json
         if not data or 'url' not in data:
+            logging.error("No URL provided in request")
             return jsonify({'error': 'URL is required'}), 400
 
         url = data['url']
@@ -32,11 +33,13 @@ def download_video():
         ydl_opts = {
             'format': 'best',
             'outtmpl': file_path,
-            'quiet': True
+            'quiet': True  # Set to False if you want more detailed output for debugging
         }
 
+        # Attempt to download the video
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
+                logging.info(f"Attempting to download video from URL: {url}")
                 result = ydl.extract_info(url, download=True)
             except yt_dlp.utils.DownloadError as de:
                 logging.error(f"DownloadError: {de}", exc_info=True)
@@ -54,11 +57,14 @@ def download_video():
                 logging.error(f"Unexpected error: {e}", exc_info=True)
                 return jsonify({'error': f'Internal server error: {e}'}), 500
 
+        # If the download is successful, return the file path
+        logging.info(f"Download successful, file saved as: {unique_filename}")
         return jsonify({'status': 'success', 'file': unique_filename}), 200
 
     except Exception as e:
-        logging.error(f"Unexpected error: {e}", exc_info=True)
+        logging.error(f"Unexpected error during processing: {e}", exc_info=True)
         return jsonify({'error': f'Internal server error: {e}'}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=10000)  # Adjust port as needed
+    # Adjust as needed for production
+    app.run(debug=True, host='0.0.0.0', port=10000)
