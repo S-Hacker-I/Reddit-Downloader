@@ -1,27 +1,19 @@
 from flask import Flask, request, send_file, jsonify
-from flask_cors import CORS
 import yt_dlp
-import os
-from uuid import uuid4
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
-
-DOWNLOAD_FOLDER = "downloads"
-
-# Ensure the downloads folder exists
-if not os.path.exists(DOWNLOAD_FOLDER):
-    os.makedirs(DOWNLOAD_FOLDER)
 
 @app.route('/download', methods=['POST'])
 def download_video():
     try:
-        data = request.get_json()
-        reddit_url = data['url']
+        reddit_url = request.json.get('url')
 
-        # Create a unique file name for the downloaded video
-        video_id = str(uuid4())
-        download_path = os.path.join(DOWNLOAD_FOLDER, f"{video_id}.mp4")
+        if not reddit_url:
+            return jsonify({'error': 'No URL provided'}), 400
+
+        # Generate unique filename for the downloaded video
+        video_id = yt_dlp.utils.Random().getrandbits(64)  # Random video ID
+        download_path = f"downloads/{video_id}.mp4"
 
         # yt-dlp options
         ydl_opts = {
@@ -32,9 +24,9 @@ def download_video():
 
         # Download the video
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info_dict = ydl.extract_info(reddit_url, download=True)
+            ydl.extract_info(reddit_url, download=True)
 
-        # Send the video file for download
+        # Respond with video ID to allow client to download later
         return jsonify({"video_id": video_id}), 200
 
     except Exception as e:
@@ -43,11 +35,14 @@ def download_video():
 @app.route('/downloaded/<video_id>', methods=['GET'])
 def serve_video(video_id):
     try:
-        file_path = os.path.join(DOWNLOAD_FOLDER, f"{video_id}.mp4")
+        file_path = f"downloads/{video_id}.mp4"
+
         if os.path.exists(file_path):
+            # Serve the video file for download
             return send_file(file_path, as_attachment=True)
         else:
             return jsonify({'error': 'File not found'}), 404
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
