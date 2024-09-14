@@ -1,126 +1,64 @@
-from flask import Flask, request, jsonify, send_from_directory, send_file, abort
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 import yt_dlp
 import os
 import logging
-import threading
-import uuid
-import time
-from werkzeug.middleware.proxy_fix import ProxyFix
-from flask_cors import CORS
+from uuid import uuid4
+import json
 
 app = Flask(__name__)
-app.wsgi_app = ProxyFix(app.wsgi_app)
-CORS(app)  # Enable CORS for all routes
+CORS(app)  # Allow all origins, adjust as needed
 
 # Set up logging
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
-# Directory to store downloaded files
-DOWNLOAD_FOLDER = 'downloads'
-if not os.path.exists(DOWNLOAD_FOLDER):
-    os.makedirs(DOWNLOAD_FOLDER)
+DOWNLOAD_DIR = 'downloads'
 
-# Dictionary to store mapping of tokens to filenames
-downloads = {}
-
-def schedule_file_deletion(filepath, delay=900):
-    """Schedule file deletion after a delay (default 15 minutes)."""
-    def delete_file():
-        time.sleep(delay)
-        if os.path.exists(filepath):
-            try:
-                os.remove(filepath)
-                logging.info(f"File {filepath} deleted after {delay} seconds")
-            except Exception as e:
-                logging.error(f"Error deleting file {filepath}: {e}")
-        else:
-            logging.info(f"File {filepath} not found for deletion")
-    
-    thread = threading.Thread(target=delete_file, daemon=True)
-    thread.start()
-
-def download_video(url, download_folder):
-    """Download and process the video."""
-    ydl_opts = {
-        'format': 'bestvideo+bestaudio/best',
-        'outtmpl': os.path.join(download_folder, '%(title)s.%(ext)s'),
-        'postprocessors': [{
-            'key': 'FFmpegVideoConvertor',
-            'preferedformat': 'mp4',
-        }],
-        'noplaylist': True,
-        'quiet': True,
-    }
-
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        try:
-            info_dict = ydl.extract_info(url, download=True)
-            filename = ydl.prepare_filename(info_dict)
-            base, ext = os.path.splitext(filename)
-            if ext != '.mp4':
-                mp4_filename = base + '.mp4'
-                mp4_filepath = os.path.join(download_folder, mp4_filename)
-                if os.path.exists(filename):
-                    os.rename(filename, mp4_filepath)
-                    filename = mp4_filename
-                else:
-                    logging.error(f'File {filename} not found for renaming')
-                    return None
-            else:
-                filename = os.path.basename(filename)
-            
-            return filename
-        except yt_dlp.utils.ExtractorError as e:
-            logging.error('Extractor error: %s', e)
-            return None
-        except Exception as e:
-            logging.error('Error: %s', e)
-            return None
+# Ensure the download directory exists
+if not os.path.exists(DOWNLOAD_DIR):
+    os.makedirs(DOWNLOAD_DIR)
 
 @app.route('/download', methods=['POST'])
-def download():
-    data = request.json
-    url = data.get('url')
+def download_video():
+    try:
+        data = request.json
+        if not data or 'url' not in data:
+            return jsonify({'error': 'URL is required'}), 400
 
-    if not url:
-        return jsonify({'error': 'URL is required'}), 400
+        url = data['url']
+        unique_filename = f"{uuid4().hex}.mp4"
+        file_path = os.path.join(DOWNLOAD_DIR, unique_filename)
 
-    def task():
-        return download_video(url, DOWNLOAD_FOLDER)
+        ydl_opts = {
+            'format': 'best',
+            'outtmpl': file_path,
+            'quiet': True
+        }
 
-    # Generate a unique token for this download request
-    token = str(uuid.uuid4())
-    
-    # Run the download in a separate thread
-    thread = threading.Thread(target=lambda: downloads.update({token: task()}))
-    thread.start()
-    thread.join()
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            try:
+                result = ydl.extract_info(url, download=True)
+            except yt_dlp.utils.DownloadError as de:
+                logging.error(f"DownloadError: {de}", exc_info=True)
+                return jsonify({'error': f'Failed to download video: {de}'}), 500
+            except yt_dlp.utils.ExtractorError as ee:
+                logging.error(f"ExtractorError: {ee}", exc_info=True)
+                return jsonify({'error': f'Failed to extract video info: {ee}'}), 500
+            except yt_dlp.utils.PostProcessingError as ppe:
+                logging.error(f"PostProcessingError: {ppe}", exc_info=True)
+                return jsonify({'error': f'Failed during post-processing: {ppe}'}), 500
+            except json.JSONDecodeError as jde:
+                logging.error(f"JSONDecodeError: {jde}", exc_info=True)
+                return jsonify({'error': 'Failed to parse JSON from the video source.'}), 500
+            except Exception as e:
+                logging.error(f"Unexpected error: {e}", exc_info=True)
+                return jsonify({'error': f'Internal server error: {e}'}), 500
 
-    filename = downloads.get(token)
-    if filename:
-        file_path = os.path.join(DOWNLOAD_FOLDER, filename)
-        if os.path.exists(file_path):
-            # Schedule the file deletion after 15 minutes
-            schedule_file_deletion(file_path)
-            return jsonify({'token': token, 'download_link': f'/downloads/{token}'})
-        else:
-            return jsonify({'error': 'Failed to locate the downloaded file'}), 500
-    else:
-        return jsonify({'error': 'Failed to download video'}), 500
+        return jsonify({'status': 'success', 'file': unique_filename}), 200
 
-@app.route('/downloads/<token>', methods=['GET'])
-def download_file(token):
-    filename = downloads.get(token)
-    if filename:
-        file_path = os.path.join(DOWNLOAD_FOLDER, filename)
-        if os.path.exists(file_path):
-            return send_file(file_path, as_attachment=True)
-        else:
-            abort(404)
-    else:
-        abort(404)
+    except Exception as e:
+        logging.error(f"Unexpected error: {e}", exc_info=True)
+        return jsonify({'error': f'Internal server error: {e}'}), 500
 
 if __name__ == '__main__':
-    import os
-    port = int(os.getenv('PORT', 5000))  # Use PORT from environment or default to 5000
-    app.run(host='0.0.0.0', port=port, debug=True, threaded=True)
+    app.run(debug=True, host='0.0.0.0', port=10000)  # Adjust port as needed
