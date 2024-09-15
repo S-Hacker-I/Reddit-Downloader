@@ -5,13 +5,13 @@ import logging
 
 app = Flask(__name__)
 
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
+
 # Directory to temporarily store video files
 VIDEO_DIR = 'videos'
 if not os.path.exists(VIDEO_DIR):
     os.makedirs(VIDEO_DIR)
-
-# Configure logging
-logging.basicConfig(level=logging.DEBUG)
 
 @app.route('/download', methods=['POST'])
 def download_video():
@@ -21,17 +21,20 @@ def download_video():
 
     # Define download options
     ydl_opts = {
-        'format': 'bestvideo+bestaudio/best',
+        'format': 'best',
         'outtmpl': os.path.join(VIDEO_DIR, 'video.mp4'),
         'noplaylist': True,
-        'quiet': False,  # Enable output for debugging
-        'writethumbnail': True,  # Optional
-        'geo_bypass': True,  # Optional
+        'quiet': True,
+        'age_limit': 18,  # Handle age-restricted content
+        'merge_output_format': 'mp4',  # Ensure output is mp4
+        'noprogress': True,  # Disable progress output
+        'writeinfojson': True,  # Write video info as JSON (for debugging)
     }
 
+    logging.debug(f"Downloading video from URL: {url}")
+    
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            logging.debug(f"Downloading video from URL: {url}")
             ydl.download([url])
     except Exception as e:
         logging.error(f"Error downloading video: {e}")
