@@ -5,13 +5,13 @@ import logging
 
 app = Flask(__name__)
 
-# Configure logging
-logging.basicConfig(level=logging.DEBUG)
-
 # Directory to temporarily store video files
 VIDEO_DIR = 'videos'
 if not os.path.exists(VIDEO_DIR):
     os.makedirs(VIDEO_DIR)
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
 
 @app.route('/download', methods=['POST'])
 def download_video():
@@ -19,33 +19,37 @@ def download_video():
     if not url:
         return jsonify({'error': 'No URL provided'}), 400
 
-    # Define download options
+    logging.info(f"Attempting to download video from URL: {url}")
+
+    # Define download options for Reddit
     ydl_opts = {
-        'format': 'best',
-        'outtmpl': os.path.join(VIDEO_DIR, 'video.mp4'),
+        'format': 'bestvideo+bestaudio/best',  # Download the best video + best audio
+        'outtmpl': os.path.join(VIDEO_DIR, 'reddit_video.%(ext)s'),  # Save with the correct extension
         'noplaylist': True,
         'quiet': True,
-        'age_limit': 18,  # Handle age-restricted content
-        'merge_output_format': 'mp4',  # Ensure output is mp4
-        'noprogress': True,  # Disable progress output
-        'writeinfojson': True,  # Write video info as JSON (for debugging)
+        'merge_output_format': 'mp4',  # Ensure the output is in mp4 format
+        'postprocessors': [{
+            'key': 'FFmpegVideoConvertor',
+            'preferedformat': 'mp4',  # Convert to mp4 if needed
+        }],
+        'age_limit': 18,  # Optional: Set age limit if needed
     }
 
-    logging.debug(f"Downloading video from URL: {url}")
-    
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-    except Exception as e:
-        logging.error(f"Error downloading video: {e}")
-        return jsonify({'error': str(e)}), 500
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        try:
+            info_dict = ydl.extract_info(url, download=True)
+            filename = ydl.prepare_filename(info_dict)  # Prepare the filename
+            logging.info(f"Downloaded video saved to: {filename}")
+        except Exception as e:
+            logging.error(f"Error downloading video: {str(e)}")
+            return jsonify({'error': str(e)}), 500
 
-    video_path = os.path.join(VIDEO_DIR, 'video.mp4')
-    if not os.path.exists(video_path):
-        logging.error('Video file not found')
-        return jsonify({'error': 'Video file not found'}), 404
+    # Ensure the file exists before sending
+    filename = os.path.join(VIDEO_DIR, 'reddit_video.mp4')
+    if not os.path.isfile(filename):
+        return jsonify({'error': 'Failed to download video'}), 500
 
-    return send_file(video_path, as_attachment=True)
+    return send_file(filename, as_attachment=True)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
