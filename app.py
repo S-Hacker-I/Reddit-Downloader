@@ -1,8 +1,13 @@
 from flask import Flask, request, send_file, jsonify
 import yt_dlp
 import os
+import logging
 
 app = Flask(__name__)
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Directory to temporarily store video files
 VIDEO_DIR = 'videos'
@@ -32,12 +37,15 @@ def download_video():
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            logger.info(f"Downloading video from URL: {url}")
             ydl.download([url])
     except Exception as e:
+        logger.error(f"Error downloading video: {e}")
         return jsonify({'error': str(e)}), 500
 
     video_path = os.path.join(VIDEO_DIR, 'video.mp4')
     if not os.path.exists(video_path):
+        logger.error('Video file not found')
         return jsonify({'error': 'Video file not found'}), 404
 
     return send_file(video_path, as_attachment=True)
