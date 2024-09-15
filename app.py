@@ -21,14 +21,12 @@ def download_video():
 
     # Define download options
     ydl_opts = {
-        'format': 'best',
+        'format': 'bestvideo+bestaudio/best',
         'outtmpl': os.path.join(VIDEO_DIR, 'video.mp4'),
         'noplaylist': True,
-        'quiet': True,
-        'age_limit': 18,  # Handle age-restricted content
-        'merge_output_format': 'mp4',  # Ensure output is mp4
-        'noprogress': True,  # Disable progress output
-        'writeinfojson': True,  # Write video info as JSON (for debugging)
+        'quiet': False,  # Enable output for debugging
+        'writethumbnail': True,  # Optional
+        'geo_bypass': True,  # Optional
     }
 
     try:
@@ -48,4 +46,3 @@ def download_video():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
-
