@@ -1,9 +1,11 @@
 from flask import Flask, request, send_file, jsonify
 import yt_dlp
 import os
+from flask_cors import CORS
 import logging
 
 app = Flask(__name__)
+CORS(app)  # Enable CORS for all routes
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
