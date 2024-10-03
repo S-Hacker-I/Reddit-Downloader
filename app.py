@@ -1,36 +1,34 @@
-from flask import Flask, request, send_file, jsonify
-import yt_dlp
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import json
 import os
 
 app = Flask(__name__)
+CORS(app)  # Allow all origins for CORS
 
-# Directory to temporarily store video files
-VIDEO_DIR = 'videos'
-if not os.path.exists(VIDEO_DIR):
-    os.makedirs(VIDEO_DIR)
+DATA_FILE = 'data.json'
 
-@app.route('/download', methods=['POST'])
-def download_video():
-    url = request.json.get('url')
-    if not url:
-        return jsonify({'error': 'No URL provided'}), 400
+# Load existing analytics data or create a new list
+if os.path.exists(DATA_FILE):
+    with open(DATA_FILE, 'r') as f:
+        analytics_data = json.load(f)
+else:
+    analytics_data = []
 
-    # Define download options
-    ydl_opts = {
-        'format': 'best',
-        'outtmpl': os.path.join(VIDEO_DIR, 'video.mp4'),
-        'noplaylist': True,
-        'quiet': True
-    }
+@app.route('/analytics/data', methods=['POST'])
+def receive_data():
+    data = request.get_json()
+    analytics_data.append(data)  # Store incoming data
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        try:
-            ydl.download([url])
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
+    # Save to JSON file
+    with open(DATA_FILE, 'w') as f:
+        json.dump(analytics_data, f)
 
-    return send_file(os.path.join(VIDEO_DIR, 'video.mp4'), as_attachment=True)
+    return jsonify({"status": "success", "data": data}), 201
+
+@app.route('/analytics', methods=['GET'])
+def get_analytics():
+    return jsonify(analytics_data), 200
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
-
+    app.run(debug=True, port=5000)
