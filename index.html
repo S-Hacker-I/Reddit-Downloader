@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TikTok Downloader - Server Analytics</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            padding: 2rem;
+        }
+        .card {
+            margin-bottom: 1.5rem;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1 class="text-center">TikTok Downloader Server Analytics</h1>
+        
+        <div class="row">
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Total Requests</h5>
+                        <p class="card-text" id="requests">0</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Last Request Time</h5>
+                        <p class="card-text" id="last-request">N/A</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Server Uptime</h5>
+                        <p class="card-text" id="uptime">Running</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="text-center">
+            <a href="/download" class="btn btn-primary">Download TikTok Video</a>
+        </div>
+    </div>
+
+    <script>
+        // Fetch and update analytics data every 10 seconds
+        function updateAnalytics() {
+            fetch('/analytics')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('requests').textContent = data.requests;
+                    document.getElementById('last-request').textContent = data.last_request || 'N/A';
+                    document.getElementById('uptime').textContent = data.uptime || 'N/A';
+                });
+        }
+
+        setInterval(updateAnalytics, 10000); // Update every 10 seconds
+        updateAnalytics(); // Initial call to populate data
+    </script>
+
+</body>
+</html>
